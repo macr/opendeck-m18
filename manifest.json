@@ -14,6 +14,20 @@
     { "Platform": "mac", "MinimumVersion": "11.3" },
     { "Platform": "windows", "MinimumVersion": "10" }
   ],
-  "Actions": [],
+  "Actions": [
+    {
+      "Name": "Set LED Color",
+      "UUID": "com.github.ibanks42.opendeck-m18.set-led-color",
+      "Icon": "assets/actionIcon",
+      "PropertyInspectorPath": "property_inspector/set_led_color.html",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "assets/actionIcon",
+          "Name": "Set LED Color"
+        }
+      ]
+    }
+  ],
   "DeviceNamespace": "18"
 }

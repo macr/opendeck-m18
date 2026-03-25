@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Set LED Colors</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 12px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        .header {
+            font-size: 12px;
+            color: #a0a0a0;
+            margin-bottom: 12px;
+        }
+        .led-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            grid-template-rows: repeat(6, 1fr);
+            gap: 4px;
+            max-width: 280px;
+        }
+        .led-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .led-label {
+            font-size: 9px;
+            color: #606060;
+            margin-bottom: 2px;
+        }
+        .led-cell input[type="color"] {
+            width: 32px;
+            height: 24px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            background: transparent;
+            padding: 0;
+        }
+        .led-cell input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 2px;
+        }
+        .led-cell input[type="color"]::-webkit-color-swatch {
+            border-radius: 2px;
+            border: 1px solid #404040;
+        }
+        .empty-cell {
+            visibility: hidden;
+        }
+        .apply-all {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #333;
+        }
+        .apply-all label {
+            font-size: 11px;
+            color: #a0a0a0;
+            display: block;
+            margin-bottom: 6px;
+        }
+        .apply-all-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .apply-all-row input[type="color"] {
+            flex: 1;
+            height: 32px;
+            width: 100%;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: transparent;
+            padding: 0;
+        }
+        .apply-all-row input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 2px;
+        }
+        .apply-all-row input[type="color"]::-webkit-color-swatch {
+            border-radius: 3px;
+            border: 1px solid #404040;
+        }
+        button {
+            background: #444;
+            color: #e0e0e0;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">LED Colors</div>
+
+    <!-- Hardware LED layout:
+         21 20 19 18 17 16 15
+         22                14
+         1                 13
+         2                 12
+         3   23       24   11
+         4  5  6  7  8  9  10
+    -->
+    <div class="led-grid" id="ledGrid">
+        <!-- Row 1: 21, 20, 19, 18, 17, 16, 15 -->
+        <div class="led-cell"><span class="led-label">21</span><input type="color" id="led20" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">20</span><input type="color" id="led19" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">19</span><input type="color" id="led18" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">18</span><input type="color" id="led17" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">17</span><input type="color" id="led16" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">16</span><input type="color" id="led15" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">15</span><input type="color" id="led14" value="#780000"></div>
+
+        <!-- Row 2: 22, empty x5, 14 -->
+        <div class="led-cell"><span class="led-label">22</span><input type="color" id="led21" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">14</span><input type="color" id="led13" value="#780000"></div>
+
+        <!-- Row 3: 1, empty x5, 13 -->
+        <div class="led-cell"><span class="led-label">1</span><input type="color" id="led0" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">13</span><input type="color" id="led12" value="#780000"></div>
+
+        <!-- Row 4: 2, empty x5, 12 -->
+        <div class="led-cell"><span class="led-label">2</span><input type="color" id="led1" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">12</span><input type="color" id="led11" value="#780000"></div>
+
+        <!-- Row 5: 3, empty, 23, empty, 24, empty, 11 -->
+        <div class="led-cell"><span class="led-label">3</span><input type="color" id="led2" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">23</span><input type="color" id="led22" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">24</span><input type="color" id="led23" value="#780000"></div>
+        <div class="led-cell empty-cell"><input type="color" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">11</span><input type="color" id="led10" value="#780000"></div>
+
+        <!-- Row 6: 4, 5, 6, 7, 8, 9, 10 -->
+        <div class="led-cell"><span class="led-label">4</span><input type="color" id="led3" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">5</span><input type="color" id="led4" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">6</span><input type="color" id="led5" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">7</span><input type="color" id="led6" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">8</span><input type="color" id="led7" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">9</span><input type="color" id="led8" value="#780000"></div>
+        <div class="led-cell"><span class="led-label">10</span><input type="color" id="led9" value="#780000"></div>
+    </div>
+
+    <div class="apply-all">
+        <label>Set all LEDs to same color:</label>
+        <div class="apply-all-row">
+            <input type="color" id="applyAllColor" value="#780000">
+            <button id="applyAllBtn">Apply to All</button>
+        </div>
+    </div>
+
+    <script>
+        let websocket = null;
+        let uuid = null;
+        const LED_COUNT = 24;
+
+        // LED positions in hardware order (1-24) mapped to array indices (0-23)
+        // The grid is laid out with led0-led23 IDs corresponding to array indices
+        const LED_IDS = Array.from({length: LED_COUNT}, (_, i) => `led${i}`);
+
+        // Get current colors as array
+        function getColors() {
+            const colors = [];
+            for (let i = 0; i < LED_COUNT; i++) {
+                colors.push(document.getElementById(`led${i}`).value);
+            }
+            return colors;
+        }
+
+        // Set colors from array
+        function setColors(colors) {
+            if (!colors || colors.length !== LED_COUNT) return;
+            for (let i = 0; i < LED_COUNT; i++) {
+                if (colors[i]) {
+                    document.getElementById(`led${i}`).value = colors[i];
+                }
+            }
+        }
+
+        // Save settings
+        function saveSettings() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    event: 'setSettings',
+                    context: uuid,
+                    payload: {
+                        ledColors: getColors()
+                    }
+                }));
+            }
+        }
+
+        // This function is called by OpenDeck when the Property Inspector loads
+        function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+            uuid = inUUID;
+            websocket = new WebSocket('ws://localhost:' + inPort);
+
+            websocket.onopen = function() {
+                // Register the Property Inspector
+                websocket.send(JSON.stringify({
+                    event: inRegisterEvent,
+                    uuid: uuid
+                }));
+            };
+
+            websocket.onmessage = function(evt) {
+                const jsonObj = JSON.parse(evt.data);
+                // Handle didReceiveSettings event
+                if (jsonObj.event === 'didReceiveSettings' && jsonObj.payload && jsonObj.payload.settings) {
+                    if (jsonObj.payload.settings.ledColors) {
+                        setColors(jsonObj.payload.settings.ledColors);
+                    }
+                }
+            };
+
+            // Load existing settings from actionInfo
+            const actionInfo = JSON.parse(inActionInfo);
+            if (actionInfo && actionInfo.payload && actionInfo.payload.settings && actionInfo.payload.settings.ledColors) {
+                setColors(actionInfo.payload.settings.ledColors);
+            }
+        }
+
+        // Add event listeners to each LED input
+        for (let i = 0; i < LED_COUNT; i++) {
+            document.getElementById(`led${i}`).addEventListener('input', saveSettings);
+        }
+
+        // Apply to all button
+        document.getElementById('applyAllBtn').addEventListener('click', function() {
+            const color = document.getElementById('applyAllColor').value;
+            for (let i = 0; i < LED_COUNT; i++) {
+                document.getElementById(`led${i}`).value = color;
+            }
+            saveSettings();
+        });
+    </script>
+</body>
+</html>

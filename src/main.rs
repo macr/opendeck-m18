@@ -1,7 +1,7 @@
-use device::{handle_error, handle_set_image};
+use device::{handle_error, handle_set_image, set_led_colors};
 use mirajazz::device::Device;
 use openaction::*;
-use std::{collections::HashMap, process::exit, sync::LazyLock};
+use std::{collections::HashMap, path::PathBuf, process::exit, sync::LazyLock};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use watcher::watcher_task;
@@ -19,6 +19,72 @@ pub static DEVICES: LazyLock<RwLock<HashMap<String, Device>>> =
 pub static TOKENS: LazyLock<RwLock<HashMap<String, CancellationToken>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 pub static TRACKER: LazyLock<Mutex<TaskTracker>> = LazyLock::new(|| Mutex::new(TaskTracker::new()));
+type LedColors = [(u8, u8, u8); 24];
+
+pub static LED_COLORS: LazyLock<RwLock<Option<LedColors>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// Returns the path to the LED colors config file
+fn led_colors_path() -> PathBuf {
+    // Get config directory (XDG_CONFIG_HOME or ~/.config)
+    let config_dir = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".config")
+        });
+
+    // Get plugin UUID from manifest.json in the same directory as the executable
+    let mut exe_dir = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    exe_dir.pop();
+    let manifest_path = exe_dir.join("manifest.json");
+
+    let plugin_uuid = std::fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .and_then(|json| json.get("PluginUUID")?.as_str().map(String::from))
+        .unwrap_or_else(|| "com.github.ibanks42.opendeck-m18".to_string());
+
+    config_dir
+        .join("opendeck")
+        .join("plugin")
+        .join(&plugin_uuid)
+        .join("led-colors.json")
+}
+
+/// Loads LED colors from the local config file
+fn load_led_colors() -> Option<[(u8, u8, u8); 24]> {
+    let path = led_colors_path();
+    let content = std::fs::read_to_string(path).ok()?;
+    let colors: Vec<String> = serde_json::from_str(&content).ok()?;
+
+    if colors.len() != 24 {
+        return None;
+    }
+
+    let mut result = [(0u8, 0u8, 0u8); 24];
+    for (i, color_str) in colors.iter().enumerate() {
+        result[i] = parse_hex_color(color_str)?;
+    }
+
+    Some(result)
+}
+
+/// Saves LED colors to the local config file
+fn save_led_colors(colors: &[(u8, u8, u8); 24]) {
+    let colors_arr: Vec<String> = colors
+        .iter()
+        .map(|(r, g, b)| format!("#{:02x}{:02x}{:02x}", r, g, b))
+        .collect();
+
+    if let Ok(json) = serde_json::to_string(&colors_arr) {
+        let path = led_colors_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, json);
+    }
+}
 
 struct GlobalEventHandler {}
 impl openaction::GlobalEventHandler for GlobalEventHandler {
@@ -26,6 +92,11 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
         &self,
         _outbound: &mut openaction::OutboundEventManager,
     ) -> EventHandlerResult {
+        // Load LED colors from local file
+        if let Some(colors) = load_led_colors() {
+            *LED_COLORS.write().await = Some(colors);
+        }
+
         let tracker = TRACKER.lock().await.clone();
 
         let token = CancellationToken::new();
@@ -89,10 +160,98 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
 
         Ok(())
     }
+
+    async fn did_receive_global_settings(
+        &self,
+        event: DidReceiveGlobalSettingsEvent,
+        _outbound: &mut OutboundEventManager,
+    ) -> EventHandlerResult {
+        log::info!("Received global settings: {:#?}", event);
+
+        if let Some(settings) = event.payload.settings.as_object() {
+            if let Some(colors) = parse_led_colors_from_settings(settings) {
+                log::info!("Setting default LED colors from global settings");
+                *LED_COLORS.write().await = Some(colors);
+
+                // Apply to all connected devices
+                let devices = DEVICES.read().await;
+                log::info!("Applying to {} connected devices", devices.len());
+                for (id, device) in devices.iter() {
+                    if let Err(e) = set_led_colors(device, &colors).await {
+                        handle_error(id, e).await;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 struct ActionEventHandler {}
-impl openaction::ActionEventHandler for ActionEventHandler {}
+impl openaction::ActionEventHandler for ActionEventHandler {
+    async fn key_down(
+        &self,
+        event: KeyEvent,
+        _outbound: &mut OutboundEventManager,
+    ) -> EventHandlerResult {
+        // Handle Set LED Color action
+        if event.action == "com.github.ibanks42.opendeck-m18.set-led-color" {
+            log::debug!("Set LED Color action triggered");
+
+            if let Some(settings) = event.payload.settings.as_object() {
+                if let Some(colors) = parse_led_colors_from_settings(settings) {
+                    log::info!("Setting LED colors");
+
+                    if let Some(device) = DEVICES.read().await.get(&event.device) {
+                        if let Err(e) = set_led_colors(device, &colors).await {
+                            handle_error(&event.device, e).await;
+                        }
+                    }
+
+                    // Save to local file for persistence across reboots
+                    *LED_COLORS.write().await = Some(colors);
+                    save_led_colors(&colors);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Parses a hex color string (#RRGGBB) to RGB values
+fn parse_hex_color(s: &str) -> Option<(u8, u8, u8)> {
+    let s = s.strip_prefix('#')?;
+    if s.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some((r, g, b))
+}
+
+/// Parses LED colors from a settings object (expected format: {"ledColors": ["#RRGGBB", ...]})
+fn parse_led_colors_from_settings(settings: &serde_json::Map<String, serde_json::Value>) -> Option<LedColors> {
+    let colors_arr = settings.get("ledColors")?.as_array()?;
+
+    if colors_arr.len() != 24 {
+        log::warn!("LED colors array has wrong length: {}", colors_arr.len());
+        return None;
+    }
+
+    let mut colors = [(0u8, 0u8, 0u8); 24];
+    for (i, color_val) in colors_arr.iter().enumerate() {
+        let color_str = color_val.as_str()?;
+        colors[i] = parse_hex_color(color_str).or_else(|| {
+            log::warn!("Invalid hex color at index {}: {:?}", i, color_str);
+            None
+        })?;
+    }
+
+    Some(colors)
+}
 
 async fn shutdown() {
     let tokens = TOKENS.write().await;

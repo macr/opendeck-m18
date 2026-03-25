@@ -8,7 +8,7 @@ use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    DEVICES, TOKENS,
+    DEVICES, LED_COLORS, TOKENS,
     inputs::opendeck_to_device,
     mappings::{
         COL_COUNT, CandidateDevice, ENCODER_COUNT, KEY_COUNT, Kind, ROW_COUNT,
@@ -62,6 +62,15 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
     }
 
     DEVICES.write().await.insert(candidate.id.clone(), device);
+
+    // Apply default LED colors if set
+    if let Some(colors) = LED_COLORS.read().await.as_ref() {
+        if let Some(device) = DEVICES.read().await.get(&candidate.id) {
+            if let Err(e) = set_led_colors(device, colors).await {
+                log::error!("Failed to set default LED colors: {}", e);
+            }
+        }
+    }
 
     tokio::select! {
         _ = device_events_task(&candidate) => {},
@@ -250,6 +259,30 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
         }
         _ => {}
     }
+
+    Ok(())
+}
+
+/// Sets all 24 LEDs to the specified RGB colors
+/// Protocol: CRT\x00\x00SETLB followed by 24 RGB values (72 bytes)
+pub async fn set_led_colors(device: &Device, colors: &[(u8, u8, u8); 24]) -> Result<(), MirajazzError> {
+    log::info!("Setting LED colors");
+
+    // Build the packet: 0x00 + "CRT\x00\x00SETLB" + 24 RGB values + padding
+    let mut buf = vec![0x00]; // Report ID byte
+    buf.extend_from_slice(b"CRT\x00\x00SETLB"); // 10 bytes
+
+    // Add 24 LED RGB values
+    for (r, g, b) in colors {
+        buf.push(*r);
+        buf.push(*g);
+        buf.push(*b);
+    }
+
+    // Pad to 1025 bytes (1 report byte + 1024 data bytes for protocol v3)
+    buf.resize(1025, 0);
+
+    device.write_data(&buf).await?;
 
     Ok(())
 }
