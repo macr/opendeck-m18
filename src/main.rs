@@ -26,14 +26,6 @@ pub static LED_COLORS: LazyLock<RwLock<Option<LedColors>>> =
 
 /// Returns the path to the LED colors config file
 fn led_colors_path() -> PathBuf {
-    // Get config directory (XDG_CONFIG_HOME or ~/.config)
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home).join(".config")
-        });
-
     // Get plugin UUID from manifest.json in the same directory as the executable
     let mut exe_dir = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     exe_dir.pop();
@@ -45,17 +37,27 @@ fn led_colors_path() -> PathBuf {
         .and_then(|json| json.get("PluginUUID")?.as_str().map(String::from))
         .unwrap_or_else(|| "com.github.ibanks42.opendeck-m18".to_string());
 
-    config_dir
-        .join("opendeck")
-        .join("plugin")
-        .join(&plugin_uuid)
-        .join("led-colors.json")
+    let filename = format!("{}.led-colors.json", plugin_uuid);
+
+    // Use cross-platform config directory with PluginUUID as filename prefix
+    directories::ProjectDirs::from("", "", "opendeck")
+        .map(|dirs| dirs.config_dir().join(&filename))
+        .or_else(|| {
+            // Fallback to base config dir with "opendeck" subdirectory
+            directories::BaseDirs::new().map(|base| base.config_dir().join("opendeck").join(&filename))
+        })
+        .unwrap_or_else(|| {
+            // Last resort: use executable directory
+            let mut path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+            path.pop();
+            path.join(".config").join(&filename)
+        })
 }
 
 /// Loads LED colors from the local config file
-fn load_led_colors() -> Option<[(u8, u8, u8); 24]> {
+async fn load_led_colors() -> Option<[(u8, u8, u8); 24]> {
     let path = led_colors_path();
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = tokio::fs::read_to_string(path).await.ok()?;
     let colors: Vec<String> = serde_json::from_str(&content).ok()?;
 
     if colors.len() != 24 {
@@ -71,7 +73,7 @@ fn load_led_colors() -> Option<[(u8, u8, u8); 24]> {
 }
 
 /// Saves LED colors to the local config file
-fn save_led_colors(colors: &[(u8, u8, u8); 24]) {
+async fn save_led_colors(colors: &[(u8, u8, u8); 24]) {
     let colors_arr: Vec<String> = colors
         .iter()
         .map(|(r, g, b)| format!("#{:02x}{:02x}{:02x}", r, g, b))
@@ -80,9 +82,9 @@ fn save_led_colors(colors: &[(u8, u8, u8); 24]) {
     if let Ok(json) = serde_json::to_string(&colors_arr) {
         let path = led_colors_path();
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            let _ = tokio::fs::create_dir_all(parent).await;
         }
-        let _ = std::fs::write(path, json);
+        let _ = tokio::fs::write(path, json).await;
     }
 }
 
@@ -93,7 +95,7 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
         _outbound: &mut openaction::OutboundEventManager,
     ) -> EventHandlerResult {
         // Load LED colors from local file
-        if let Some(colors) = load_led_colors() {
+        if let Some(colors) = load_led_colors().await {
             *LED_COLORS.write().await = Some(colors);
         }
 
@@ -127,13 +129,20 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
 
         let id = event.device.clone();
 
-        if let Some(device) = DEVICES.read().await.get(&event.device) {
-            handle_set_image(device, event)
-                .await
-                .map_err(async |err| handle_error(&id, err).await)
-                .ok();
-        } else {
-            log::error!("Received event for unknown device: {}", event.device);
+        let result = {
+            let devices = DEVICES.read().await;
+            match devices.get(&id) {
+                Some(device) => Some(handle_set_image(device, event).await),
+                None => None,
+            }
+        }; // Read guard dropped here
+
+        match result {
+            Some(Err(e)) => {
+                let _ = handle_error(&id, e).await;
+            }
+            None => log::error!("Received event for unknown device: {}", id),
+            _ => {}
         }
 
         Ok(())
@@ -148,14 +157,20 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
 
         let id = event.device.clone();
 
-        if let Some(device) = DEVICES.read().await.get(&event.device) {
-            device
-                .set_brightness(event.brightness)
-                .await
-                .map_err(async |err| handle_error(&id, err).await)
-                .ok();
-        } else {
-            log::error!("Received event for unknown device: {}", event.device);
+        let result = {
+            let devices = DEVICES.read().await;
+            match devices.get(&id) {
+                Some(device) => Some(device.set_brightness(event.brightness).await),
+                None => None,
+            }
+        }; // Read guard dropped here
+
+        match result {
+            Some(Err(e)) => {
+                let _ = handle_error(&id, e).await;
+            }
+            None => log::error!("Received event for unknown device: {}", id),
+            _ => {}
         }
 
         Ok(())
@@ -174,11 +189,20 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
                 *LED_COLORS.write().await = Some(colors);
 
                 // Apply to all connected devices
-                let devices = DEVICES.read().await;
-                log::info!("Applying to {} connected devices", devices.len());
-                for (id, device) in devices.iter() {
-                    if let Err(e) = set_led_colors(device, &colors).await {
-                        handle_error(id, e).await;
+                let device_ids: Vec<String> = DEVICES.read().await.keys().cloned().collect();
+                log::info!("Applying to {} connected devices", device_ids.len());
+
+                for id in device_ids {
+                    let result = {
+                        let devices = DEVICES.read().await;
+                        match devices.get(&id) {
+                            Some(device) => Some(set_led_colors(device, &colors).await),
+                            None => None,
+                        }
+                    }; // Read guard dropped here
+
+                    if let Some(Err(e)) = result {
+                        let _ = handle_error(&id, e).await;
                     }
                 }
             }
@@ -203,15 +227,23 @@ impl openaction::ActionEventHandler for ActionEventHandler {
                 if let Some(colors) = parse_led_colors_from_settings(settings) {
                     log::info!("Setting LED colors");
 
-                    if let Some(device) = DEVICES.read().await.get(&event.device) {
-                        if let Err(e) = set_led_colors(device, &colors).await {
-                            handle_error(&event.device, e).await;
+                    let device_id = event.device.clone();
+
+                    let result = {
+                        let devices = DEVICES.read().await;
+                        match devices.get(&device_id) {
+                            Some(device) => Some(set_led_colors(device, &colors).await),
+                            None => None,
                         }
+                    }; // Read guard dropped here
+
+                    if let Some(Err(e)) = result {
+                        let _ = handle_error(&device_id, e).await;
                     }
 
                     // Save to local file for persistence across reboots
                     *LED_COLORS.write().await = Some(colors);
-                    save_led_colors(&colors);
+                    save_led_colors(&colors).await;
                 }
             }
         }

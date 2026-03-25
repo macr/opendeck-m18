@@ -48,7 +48,7 @@ Use the "Set LED Color" action to customize LED colors:
 1. Add the action to any button in OpenDeck
 2. In the Property Inspector, click on each LED to select its color
 3. Use "Apply to All" to set all LEDs to the same color
-4. Colors are saved and persist across device reboots
+4. Colors are saved locally and automatically reapplied when the device reconnects
 
 ## Platform support
 

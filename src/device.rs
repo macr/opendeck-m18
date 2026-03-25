@@ -61,16 +61,14 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
             .unwrap();
     }
 
-    DEVICES.write().await.insert(candidate.id.clone(), device);
-
-    // Apply default LED colors if set
+    // Apply default LED colors if set (before inserting to avoid lock re-entry)
     if let Some(colors) = LED_COLORS.read().await.as_ref() {
-        if let Some(device) = DEVICES.read().await.get(&candidate.id) {
-            if let Err(e) = set_led_colors(device, colors).await {
-                log::error!("Failed to set default LED colors: {}", e);
-            }
+        if let Err(e) = set_led_colors(&device, colors).await {
+            log::error!("Failed to set default LED colors: {}", e);
         }
     }
+
+    DEVICES.write().await.insert(candidate.id.clone(), device);
 
     tokio::select! {
         _ = device_events_task(&candidate) => {},
