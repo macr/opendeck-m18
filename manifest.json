@@ -27,6 +27,18 @@
           "Name": "Set LED Color"
         }
       ]
+    },
+    {
+      "Name": "Load LED Color",
+      "UUID": "com.github.ibanks42.opendeck-m18.load-led-color",
+      "Icon": "assets/actionIcon",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "assets/actionIcon",
+          "Name": "Load LED Color"
+        }
+      ]
     }
   ],
   "DeviceNamespace": "18"

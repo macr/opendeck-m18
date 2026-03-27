@@ -1,7 +1,7 @@
 use device::{handle_error, handle_set_image, set_led_colors};
 use mirajazz::device::Device;
 use openaction::*;
-use std::{collections::HashMap, path::PathBuf, process::exit, sync::LazyLock};
+use std::{collections::HashMap, process::exit, sync::LazyLock};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use watcher::watcher_task;
@@ -24,81 +24,12 @@ type LedColors = [(u8, u8, u8); 24];
 pub static LED_COLORS: LazyLock<RwLock<Option<LedColors>>> =
     LazyLock::new(|| RwLock::new(None));
 
-/// Returns the path to the LED colors config file
-fn led_colors_path() -> PathBuf {
-    // Get plugin UUID from manifest.json in the same directory as the executable
-    let mut exe_dir = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    exe_dir.pop();
-    let manifest_path = exe_dir.join("manifest.json");
-
-    let plugin_uuid = std::fs::read_to_string(&manifest_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .and_then(|json| json.get("PluginUUID")?.as_str().map(String::from))
-        .unwrap_or_else(|| "com.github.ibanks42.opendeck-m18".to_string());
-
-    let filename = format!("{}.led-colors.json", plugin_uuid);
-
-    // Use cross-platform config directory with PluginUUID as filename prefix
-    directories::ProjectDirs::from("", "", "opendeck")
-        .map(|dirs| dirs.config_dir().join(&filename))
-        .or_else(|| {
-            // Fallback to base config dir with "opendeck" subdirectory
-            directories::BaseDirs::new().map(|base| base.config_dir().join("opendeck").join(&filename))
-        })
-        .unwrap_or_else(|| {
-            // Last resort: use executable directory
-            let mut path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-            path.pop();
-            path.join(".config").join(&filename)
-        })
-}
-
-/// Loads LED colors from the local config file
-async fn load_led_colors() -> Option<[(u8, u8, u8); 24]> {
-    let path = led_colors_path();
-    let content = tokio::fs::read_to_string(path).await.ok()?;
-    let colors: Vec<String> = serde_json::from_str(&content).ok()?;
-
-    if colors.len() != 24 {
-        return None;
-    }
-
-    let mut result = [(0u8, 0u8, 0u8); 24];
-    for (i, color_str) in colors.iter().enumerate() {
-        result[i] = parse_hex_color(color_str)?;
-    }
-
-    Some(result)
-}
-
-/// Saves LED colors to the local config file
-async fn save_led_colors(colors: &[(u8, u8, u8); 24]) {
-    let colors_arr: Vec<String> = colors
-        .iter()
-        .map(|(r, g, b)| format!("#{:02x}{:02x}{:02x}", r, g, b))
-        .collect();
-
-    if let Ok(json) = serde_json::to_string(&colors_arr) {
-        let path = led_colors_path();
-        if let Some(parent) = path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        let _ = tokio::fs::write(path, json).await;
-    }
-}
-
 struct GlobalEventHandler {}
 impl openaction::GlobalEventHandler for GlobalEventHandler {
     async fn plugin_ready(
         &self,
         _outbound: &mut openaction::OutboundEventManager,
     ) -> EventHandlerResult {
-        // Load LED colors from local file
-        if let Some(colors) = load_led_colors().await {
-            *LED_COLORS.write().await = Some(colors);
-        }
-
         let tracker = TRACKER.lock().await.clone();
 
         let token = CancellationToken::new();
@@ -217,7 +148,7 @@ impl openaction::ActionEventHandler for ActionEventHandler {
     async fn key_down(
         &self,
         event: KeyEvent,
-        _outbound: &mut OutboundEventManager,
+        outbound: &mut OutboundEventManager,
     ) -> EventHandlerResult {
         // Handle Set LED Color action
         if event.action == "com.github.ibanks42.opendeck-m18.set-led-color" {
@@ -241,10 +172,51 @@ impl openaction::ActionEventHandler for ActionEventHandler {
                         let _ = handle_error(&device_id, e).await;
                     }
 
-                    // Save to local file for persistence across reboots
-                    *LED_COLORS.write().await = Some(colors);
-                    save_led_colors(&colors).await;
+                    // Check if we should save to global settings
+                    let save_global = settings
+                        .get("saveGlobal")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    if save_global {
+                        // Update in-memory cache
+                        *LED_COLORS.write().await = Some(colors);
+
+                        // Persist via OpenDeck's global settings
+                        let global_settings = serde_json::json!({
+                            "ledColors": colors.iter()
+                                .map(|(r, g, b)| format!("#{:02x}{:02x}{:02x}", r, g, b))
+                                .collect::<Vec<_>>()
+                        });
+                        if let Err(e) = outbound.set_global_settings(global_settings).await {
+                            log::error!("Failed to save global settings: {}", e);
+                        }
+                    }
                 }
+            }
+        }
+
+        // Handle Load LED Color action
+        if event.action == "com.github.ibanks42.opendeck-m18.load-led-color" {
+            log::debug!("Load LED Color action triggered");
+
+            if let Some(colors) = LED_COLORS.read().await.as_ref() {
+                log::info!("Loading saved LED colors");
+                let device_id = event.device.clone();
+
+                let result = {
+                    let devices = DEVICES.read().await;
+                    match devices.get(&device_id) {
+                        Some(device) => Some(set_led_colors(device, colors).await),
+                        None => None,
+                    }
+                };
+
+                if let Some(Err(e)) = result {
+                    let _ = handle_error(&device_id, e).await;
+                }
+            } else {
+                log::warn!("No saved LED colors found");
             }
         }
 
