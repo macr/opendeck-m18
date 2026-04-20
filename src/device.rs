@@ -160,6 +160,23 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
             }
         };
 
+        // If no state changes but data was received, device is waking from sleep
+        if updates.is_empty() {
+            log::info!("Device {} waking from sleep, re-initializing", candidate.id);
+
+            if let Some(device) = DEVICES.read().await.get(&candidate.id) {
+                if let Err(e) = wake_up_device(device).await {
+                    log::error!("Failed to re-initialize device {}: {}", candidate.id, e);
+                }
+            }
+
+            if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
+                outbound.key_down(candidate.id.clone(), 0).await.ok();
+                outbound.key_up(candidate.id.clone(), 0).await.ok();
+            }
+            continue;
+        }
+
         for update in updates {
             log::info!("New update: {:#?}", update);
 
@@ -257,6 +274,34 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
         }
         _ => {}
     }
+
+    Ok(())
+}
+
+/// Sends a sleep command to the device
+/// Protocol: CRT\x00\x00HAN followed by zeros, padded to 1024 bytes
+pub async fn sleep_device(device: &Device) -> Result<(), MirajazzError> {
+    log::info!("Sending sleep command to device");
+
+    let mut buf = vec![0x00]; // Report ID byte
+    buf.extend_from_slice(b"CRT\x00\x00HAN");
+    buf.resize(1025, 0);
+
+    device.write_data(&buf).await?;
+
+    Ok(())
+}
+
+/// Re-initializes the device after wake-up by sending DIS and LIG commands
+/// (mirrors mirajazz's initialize() which is guarded by an already-set flag)
+pub async fn wake_up_device(device: &Device) -> Result<(), MirajazzError> {
+    let mut buf = vec![0x00, 0x43, 0x52, 0x54, 0x00, 0x00, 0x44, 0x49, 0x53];
+    buf.resize(1025, 0);
+    device.write_data(&buf).await?;
+
+    let mut buf = vec![0x00, 0x43, 0x52, 0x54, 0x00, 0x00, 0x4c, 0x49, 0x47, 0x00, 0x00, 0x00, 0x00];
+    buf.resize(1025, 0);
+    device.write_data(&buf).await?;
 
     Ok(())
 }

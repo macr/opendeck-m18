@@ -1,4 +1,4 @@
-use device::{handle_error, handle_set_image, set_led_colors};
+use device::{handle_error, handle_set_image, set_led_colors, sleep_device};
 use mirajazz::device::Device;
 use openaction::*;
 use std::{collections::HashMap, process::exit, sync::LazyLock};
@@ -91,7 +91,13 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
         let result = {
             let devices = DEVICES.read().await;
             match devices.get(&id) {
-                Some(device) => Some(device.set_brightness(event.brightness).await),
+                Some(device) => {
+                    if event.brightness == 0 {
+                        Some(sleep_device(device).await)
+                    } else {
+                        Some(device.set_brightness(event.brightness).await)
+                    }
+                }
                 None => None,
             }
         }; // Read guard dropped here
