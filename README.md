@@ -4,7 +4,7 @@
 
 An unofficial plugin for VSD Inside M18 / Mirabox M18 devices.
 
-**This is a fork of [opendeck-akp153](https://github.com/4ndv/opendeck-akp153) by Andrey Viktorov (st.lynx), adapted for the M18 device.**
+**This is a fork of [opendeck-m18](https://github.com/ibanks42/opendeck-m18) which is a fork of [opendeck-akp153](https://github.com/4ndv/opendeck-akp153) by Andrey Viktorov (st.lynx), adapted for the M18 device. This fork adds support for updating the LED lights and the sleep after inactivity feature of OpenDeck**
 
 ## OpenDeck version
 
@@ -19,6 +19,7 @@ Requires OpenDeck 2.5.0 or newer
 ## Device Layout
 
 The M18 has:
+
 - 15 LCD keys (5 columns x 3 rows)
 - 3 bottom buttons (non-LCD, mapped to keys 16-18 in OpenDeck)
 
@@ -27,6 +28,7 @@ The M18 has:
 ## RGB LED Control
 
 The M18 has 24 RGB LEDs:
+
 - 22 LEDs around the device edges
 - 2 LEDs on the bottom row (between buttons)
 
@@ -58,7 +60,7 @@ Use the "Set LED Color" action to customize LED colors:
 
 ## Installation
 
-1. Download an archive from [releases](https://github.com/ibanks42/opendeck-m18/releases)
+1. Download an archive from [releases](https://github.com/macr/opendeck-m18/releases)
 2. In OpenDeck: Plugins -> Install from file
 3. Linux: Download [udev rules](./40-opendeck-m18.rules) and install them by copying into `/etc/udev/rules.d/` and running `sudo udevadm control --reload-rules`
 4. Unplug and plug again the device, restart OpenDeck

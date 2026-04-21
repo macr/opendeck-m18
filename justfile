@@ -1,4 +1,4 @@
-id := "com.github.ibanks42.opendeck-m18.sdPlugin"
+id := "com.github.macr.opendeck-m18.sdPlugin"
 
 release: bump package tag
 

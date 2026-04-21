@@ -177,7 +177,7 @@ impl openaction::ActionEventHandler for ActionEventHandler {
         outbound: &mut OutboundEventManager,
     ) -> EventHandlerResult {
         // Handle Set LED Color action
-        if event.action == "com.github.ibanks42.opendeck-m18.set-led-color" {
+        if event.action == "com.github.macr.opendeck-m18.set-led-color" {
             log::debug!("Set LED Color action triggered");
 
             if let Some(settings) = event.payload.settings.as_object()
@@ -232,7 +232,7 @@ impl openaction::ActionEventHandler for ActionEventHandler {
         }
 
         // Handle Load LED Color action
-        if event.action == "com.github.ibanks42.opendeck-m18.load-led-color" {
+        if event.action == "com.github.macr.opendeck-m18.load-led-color" {
             log::debug!("Load LED Color action triggered");
 
             if let Some(colors) = LED_COLORS.read().await.as_ref() {
