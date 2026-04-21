@@ -31,7 +31,8 @@ build-mac:
     docker run --rm -v $(pwd):/io -w /io ghcr.io/rust-cross/cargo-zigbuild:sha-e871b6e cargo zigbuild --release --target universal2-apple-darwin --target-dir target/plugin-mac
 
 build-win:
-    docker run --rm -v $(pwd):/io -w /io rust:latest sh -c "apt-get update && apt-get install -y gcc-mingw-w64-x86-64 && rustup target add x86_64-pc-windows-gnu && cargo build --release --target x86_64-pc-windows-gnu --target-dir target/plugin-win"
+    docker build -t opendeck-m18-win -f Dockerfile.win .
+    docker run --rm -v $(pwd):/io -w /io opendeck-m18-win cargo build --release --target x86_64-pc-windows-gnu --target-dir target/plugin-win
 
 clean:
     rm -rf target/
