@@ -6,6 +6,12 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use watcher::watcher_task;
 
+fn get_plugin_uuid() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let pos = args.iter().position(|x| x.to_lowercase().trim() == "-pluginuuid")?;
+    Some(args.get(pos + 1)?.clone())
+}
+
 #[cfg(not(target_os = "windows"))]
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -28,8 +34,22 @@ struct GlobalEventHandler {}
 impl openaction::GlobalEventHandler for GlobalEventHandler {
     async fn plugin_ready(
         &self,
-        _outbound: &mut openaction::OutboundEventManager,
+        outbound: &mut openaction::OutboundEventManager,
     ) -> EventHandlerResult {
+        if let Some(uuid) = get_plugin_uuid() {
+            if let Err(e) = outbound
+                .send_event(serde_json::json!({
+                    "event": "getGlobalSettings",
+                    "context": uuid,
+                }))
+                .await
+            {
+                log::error!("Failed to request global settings: {}", e);
+            }
+        } else {
+            log::warn!("Could not find plugin UUID in CLI args");
+        }
+
         let tracker = TRACKER.lock().await.clone();
 
         let token = CancellationToken::new();
@@ -120,27 +140,27 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
     ) -> EventHandlerResult {
         log::info!("Received global settings: {:#?}", event);
 
-        if let Some(settings) = event.payload.settings.as_object() {
-            if let Some(colors) = parse_led_colors_from_settings(settings) {
-                log::info!("Setting default LED colors from global settings");
-                *LED_COLORS.write().await = Some(colors);
+        if let Some(settings) = event.payload.settings.as_object()
+            && let Some(colors) = parse_led_colors_from_settings(settings)
+        {
+            log::info!("Setting default LED colors from global settings");
+            *LED_COLORS.write().await = Some(colors);
 
-                // Apply to all connected devices
-                let device_ids: Vec<String> = DEVICES.read().await.keys().cloned().collect();
-                log::info!("Applying to {} connected devices", device_ids.len());
+            // Apply to all connected devices
+            let device_ids: Vec<String> = DEVICES.read().await.keys().cloned().collect();
+            log::info!("Applying to {} connected devices", device_ids.len());
 
-                for id in device_ids {
-                    let result = {
-                        let devices = DEVICES.read().await;
-                        match devices.get(&id) {
-                            Some(device) => Some(set_led_colors(device, &colors).await),
-                            None => None,
-                        }
-                    }; // Read guard dropped here
-
-                    if let Some(Err(e)) = result {
-                        let _ = handle_error(&id, e).await;
+            for id in device_ids {
+                let result = {
+                    let devices = DEVICES.read().await;
+                    match devices.get(&id) {
+                        Some(device) => Some(set_led_colors(device, &colors).await),
+                        None => None,
                     }
+                }; // Read guard dropped here
+
+                if let Some(Err(e)) = result {
+                    let _ = handle_error(&id, e).await;
                 }
             }
         }
@@ -160,41 +180,50 @@ impl openaction::ActionEventHandler for ActionEventHandler {
         if event.action == "com.github.ibanks42.opendeck-m18.set-led-color" {
             log::debug!("Set LED Color action triggered");
 
-            if let Some(settings) = event.payload.settings.as_object() {
-                if let Some(colors) = parse_led_colors_from_settings(settings) {
-                    log::info!("Setting LED colors");
+            if let Some(settings) = event.payload.settings.as_object()
+                && let Some(colors) = parse_led_colors_from_settings(settings)
+            {
+                log::info!("Setting LED colors");
 
-                    let device_id = event.device.clone();
+                let device_id = event.device.clone();
 
-                    let result = {
-                        let devices = DEVICES.read().await;
-                        match devices.get(&device_id) {
-                            Some(device) => Some(set_led_colors(device, &colors).await),
-                            None => None,
-                        }
-                    }; // Read guard dropped here
-
-                    if let Some(Err(e)) = result {
-                        let _ = handle_error(&device_id, e).await;
+                let result = {
+                    let devices = DEVICES.read().await;
+                    match devices.get(&device_id) {
+                        Some(device) => Some(set_led_colors(device, &colors).await),
+                        None => None,
                     }
+                }; // Read guard dropped here
 
-                    // Check if we should save to global settings
-                    let save_global = settings
-                        .get("saveGlobal")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                if let Some(Err(e)) = result {
+                    let _ = handle_error(&device_id, e).await;
+                }
 
-                    if save_global {
-                        // Update in-memory cache
-                        *LED_COLORS.write().await = Some(colors);
+                // Check if we should save to global settings
+                let save_global = settings
+                    .get("saveGlobal")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
-                        // Persist via OpenDeck's global settings
-                        let global_settings = serde_json::json!({
+                if save_global {
+                    // Update in-memory cache
+                    *LED_COLORS.write().await = Some(colors);
+
+                    // Persist via OpenDeck's global settings (with context)
+                    if let Some(uuid) = get_plugin_uuid() {
+                        let payload = serde_json::json!({
                             "ledColors": colors.iter()
                                 .map(|(r, g, b)| format!("#{:02x}{:02x}{:02x}", r, g, b))
                                 .collect::<Vec<_>>()
                         });
-                        if let Err(e) = outbound.set_global_settings(global_settings).await {
+                        if let Err(e) = outbound
+                            .send_event(serde_json::json!({
+                                "event": "setGlobalSettings",
+                                "context": uuid,
+                                "payload": payload,
+                            }))
+                            .await
+                        {
                             log::error!("Failed to save global settings: {}", e);
                         }
                     }
@@ -264,14 +293,23 @@ fn parse_led_colors_from_settings(settings: &serde_json::Map<String, serde_json:
 }
 
 async fn shutdown() {
-    let tokens = TOKENS.write().await;
+    let device_ids: Vec<String> = DEVICES.read().await.keys().cloned().collect();
 
+    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
+        for id in &device_ids {
+            if let Err(e) = outbound.deregister_device(id.clone()).await {
+                log::error!("Failed to deregister device {} during shutdown: {}", id, e);
+            }
+        }
+    }
+
+    let tokens = TOKENS.write().await;
     for (_, token) in tokens.iter() {
         token.cancel();
     }
 }
 
-async fn connect() {
+async fn run_plugin() {
     if let Err(error) = init_plugin(GlobalEventHandler {}, ActionEventHandler {}).await {
         log::error!("Failed to initialize plugin: {}", error);
 
@@ -308,7 +346,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     tokio::select! {
-        _ = connect() => {},
+        _ = run_plugin() => {},
         _ = sigterm() => {},
     }
 

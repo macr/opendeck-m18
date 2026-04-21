@@ -18,6 +18,7 @@ pub const ENCODER_COUNT: usize = 0;
 pub enum Kind {
     VsdInsideM18,
     MiraboxM18,
+    MiraboxM18EN,
 }
 
 pub const VSDINSIDE_VID: u16 = 0x5548;
@@ -36,7 +37,7 @@ pub const QUERIES: [DeviceQuery; 3] = [VSDINSIDE_M18_QUERY, MIRABOX_M18_QUERY, M
 /// Returns correct image format for device kind and key
 pub fn get_image_format_for_key(kind: &Kind, _key: u8) -> ImageFormat {
     match kind {
-        Kind::VsdInsideM18 | Kind::MiraboxM18 => ImageFormat {
+        Kind::VsdInsideM18 | Kind::MiraboxM18 | Kind::MiraboxM18EN => ImageFormat {
             mode: ImageMode::JPEG,
             size: (64, 64),
             rotation: ImageRotation::Rot180,
@@ -51,7 +52,7 @@ impl Kind {
         match (vid, pid) {
             (VSDINSIDE_VID, VSDINSIDE_M18_PID) => Some(Kind::VsdInsideM18),
             (MIRABOX_VID, MIRABOX_M18_PID) => Some(Kind::MiraboxM18),
-            (MIRABOX_VID, MIRABOX_M18EN_PID) => Some(Kind::MiraboxM18),
+            (MIRABOX_VID, MIRABOX_M18EN_PID) => Some(Kind::MiraboxM18EN),
             _ => None,
         }
     }
@@ -63,7 +64,7 @@ impl Kind {
     /// M18 uses protocol 3 (supports both press and release states)
     pub fn protocol_version(&self) -> usize {
         match self {
-            Self::VsdInsideM18 | Self::MiraboxM18 => 3,
+            Self::VsdInsideM18 | Self::MiraboxM18 | Self::MiraboxM18EN => 3,
         }
     }
 
@@ -72,6 +73,7 @@ impl Kind {
         match self {
             Self::VsdInsideM18 => "VSD Inside M18",
             Self::MiraboxM18 => "Mirabox M18",
+            Self::MiraboxM18EN => "Mirabox M18 EN",
         }
         .to_string()
     }
@@ -82,6 +84,7 @@ impl Kind {
         match self {
             Self::VsdInsideM18 => "VSD-M18",
             Self::MiraboxM18 => "MBOX-M18",
+            Self::MiraboxM18EN => "MBOX-M18-EN",
         }
         .to_string()
     }

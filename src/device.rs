@@ -21,7 +21,7 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
     log::info!("Running device task for {:?}", candidate);
 
     // Wrap in a closure so we can use `?` operator
-    let device = async || -> Result<Device, MirajazzError> {
+    let device = async {
         let device = connect(&candidate).await?;
 
         device.set_brightness(50).await?;
@@ -29,7 +29,7 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
         device.flush().await?;
 
         Ok(device)
-    }()
+    }
     .await;
 
     let device: Device = match device {
@@ -47,8 +47,8 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
     };
 
     log::info!("Registering device {}", candidate.id);
-    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
-        outbound
+    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut()
+        && let Err(e) = outbound
             .register_device(
                 candidate.id.clone(),
                 candidate.kind.human_name(),
@@ -58,14 +58,15 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
                 0,
             )
             .await
-            .unwrap();
+    {
+        log::error!("Failed to register device {}: {}", candidate.id, e);
     }
 
     // Apply default LED colors if set (before inserting to avoid lock re-entry)
-    if let Some(colors) = LED_COLORS.read().await.as_ref() {
-        if let Err(e) = set_led_colors(&device, colors).await {
-            log::error!("Failed to set default LED colors: {}", e);
-        }
+    if let Some(colors) = LED_COLORS.read().await.as_ref()
+        && let Err(e) = set_led_colors(&device, colors).await
+    {
+        log::error!("Failed to set default LED colors: {}", e);
     }
 
     DEVICES.write().await.insert(candidate.id.clone(), device);
@@ -86,7 +87,7 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
 }
 
 /// Handles errors, returning true if should continue, returning false if an error is fatal
-pub async fn handle_error(id: &String, err: MirajazzError) -> bool {
+pub async fn handle_error(id: &str, err: MirajazzError) -> bool {
     log::error!("Device {} error: {}", id, err);
 
     // Some errors are not critical and can be ignored without sending disconnected event
@@ -95,8 +96,10 @@ pub async fn handle_error(id: &String, err: MirajazzError) -> bool {
     }
 
     log::info!("Deregistering device {}", id);
-    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
-        outbound.deregister_device(id.clone()).await.unwrap();
+    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut()
+        && let Err(e) = outbound.deregister_device(id.to_string()).await
+    {
+        log::error!("Failed to deregister device {}: {}", id, e);
     }
 
     log::info!("Cancelling tasks for device {}", id);
@@ -144,10 +147,10 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
 
     log::info!("Connected to {} for incoming events", candidate.id);
 
-    log::info!("Reader is ready for {}", candidate.id);
+    log::debug!("Reader is ready for {}", candidate.id);
 
     loop {
-        log::info!("Reading updates...");
+        log::debug!("Reading updates...");
 
         let updates = match reader.read(None).await {
             Ok(updates) => updates,
@@ -164,10 +167,10 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
         if updates.is_empty() {
             log::info!("Device {} waking from sleep, re-initializing", candidate.id);
 
-            if let Some(device) = DEVICES.read().await.get(&candidate.id) {
-                if let Err(e) = wake_up_device(device).await {
-                    log::error!("Failed to re-initialize device {}: {}", candidate.id, e);
-                }
+            if let Some(device) = DEVICES.read().await.get(&candidate.id)
+                && let Err(e) = wake_up_device(device).await
+            {
+                log::error!("Failed to re-initialize device {}: {}", candidate.id, e);
             }
 
             if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
@@ -184,19 +187,30 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
 
             if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
                 match update {
-                    DeviceStateUpdate::ButtonDown(key) => outbound.key_down(id, key).await.unwrap(),
-                    DeviceStateUpdate::ButtonUp(key) => outbound.key_up(id, key).await.unwrap(),
+                    DeviceStateUpdate::ButtonDown(key) => {
+                        if let Err(e) = outbound.key_down(id, key).await {
+                            log::error!("Failed to send key_down: {}", e);
+                        }
+                    }
+                    DeviceStateUpdate::ButtonUp(key) => {
+                        if let Err(e) = outbound.key_up(id, key).await {
+                            log::error!("Failed to send key_up: {}", e);
+                        }
+                    }
                     DeviceStateUpdate::EncoderDown(encoder) => {
-                        outbound.encoder_down(id, encoder).await.unwrap();
+                        if let Err(e) = outbound.encoder_down(id, encoder).await {
+                            log::error!("Failed to send encoder_down: {}", e);
+                        }
                     }
                     DeviceStateUpdate::EncoderUp(encoder) => {
-                        outbound.encoder_up(id, encoder).await.unwrap();
+                        if let Err(e) = outbound.encoder_up(id, encoder).await {
+                            log::error!("Failed to send encoder_up: {}", e);
+                        }
                     }
                     DeviceStateUpdate::EncoderTwist(encoder, val) => {
-                        outbound
-                            .encoder_change(id, encoder, val as i16)
-                            .await
-                            .unwrap();
+                        if let Err(e) = outbound.encoder_change(id, encoder, val as i16).await {
+                            log::error!("Failed to send encoder_change: {}", e);
+                        }
                     }
                 }
             }
@@ -213,7 +227,7 @@ async fn keepalive_task(candidate: &CandidateDevice) -> Result<(), MirajazzError
     loop {
         interval.tick().await;
 
-        log::info!("Sending keepalive to {}", candidate.id);
+        log::debug!("Sending keepalive to {}", candidate.id);
 
         let devices_lock = DEVICES.read().await;
         let device = match devices_lock.get(&candidate.id) {
@@ -239,8 +253,20 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
             log::info!("Setting image for button {}", position);
 
             // OpenDeck sends image as a data url, so parse it using a library
-            let url = DataUrl::process(image.as_str()).unwrap(); // Isn't expected to fail, so unwrap it is
-            let (body, _fragment) = url.decode_to_vec().unwrap(); // Same here
+            let url = match DataUrl::process(image.as_str()) {
+                Ok(url) => url,
+                Err(e) => {
+                    log::error!("Failed to parse data URL: {:?}", e);
+                    return Ok(());
+                }
+            };
+            let (body, _fragment) = match url.decode_to_vec() {
+                Ok(data) => data,
+                Err(e) => {
+                    log::error!("Failed to decode data URL: {:?}", e);
+                    return Ok(());
+                }
+            };
 
             // Allow only image/jpeg mime for now
             if url.mime_type().subtype != "jpeg" {

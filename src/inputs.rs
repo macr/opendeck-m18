@@ -1,6 +1,10 @@
+use std::sync::Mutex;
+
 use mirajazz::{error::MirajazzError, types::DeviceInput};
 
 use crate::mappings::KEY_COUNT;
+
+static BUTTON_STATE: Mutex<[u8; KEY_COUNT]> = Mutex::new([0u8; KEY_COUNT]);
 
 // Bottom button input codes (non-LCD buttons)
 const BTN_LEFT: u8 = 0x25;
@@ -8,7 +12,7 @@ const BTN_MIDDLE: u8 = 0x30;
 const BTN_RIGHT: u8 = 0x31;
 
 pub fn process_input(input: u8, state: u8) -> Result<DeviceInput, MirajazzError> {
-    log::info!("Processing input: key={}, state={}", input, state);
+    log::debug!("Processing input: key={}, state={}", input, state);
 
     match input {
         0..=15 => read_button_press(input, state),
@@ -41,17 +45,10 @@ pub fn opendeck_to_device(key: u8) -> u8 {
 }
 
 fn read_button_press(input: u8, state: u8) -> Result<DeviceInput, MirajazzError> {
-    let mut button_states = vec![0x01];
-    button_states.extend(vec![0u8; KEY_COUNT + 1]);
-
     if input == 0 {
-        return Ok(DeviceInput::ButtonStateChange(read_button_states(
-            &button_states,
-        )));
-    }
-
-    // Only trigger on press (state=1), ignore release (state=0)
-    if state == 0 {
+        let states = BUTTON_STATE.lock().unwrap();
+        let mut button_states = vec![0x01u8];
+        button_states.extend_from_slice(&*states);
         return Ok(DeviceInput::ButtonStateChange(read_button_states(
             &button_states,
         )));
@@ -68,7 +65,11 @@ fn read_button_press(input: u8, state: u8) -> Result<DeviceInput, MirajazzError>
         _ => return Err(MirajazzError::BadData),
     };
 
-    button_states[pressed_index + 1] = state;
+    let mut states = BUTTON_STATE.lock().unwrap();
+    states[pressed_index] = state;
+
+    let mut button_states = vec![0x01u8];
+    button_states.extend_from_slice(&*states);
 
     Ok(DeviceInput::ButtonStateChange(read_button_states(
         &button_states,

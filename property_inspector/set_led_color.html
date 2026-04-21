@@ -266,6 +266,14 @@
                 }
             };
 
+            websocket.onerror = function(err) {
+                console.error('WebSocket error:', err);
+            };
+
+            websocket.onclose = function() {
+                console.warn('WebSocket connection closed');
+            };
+
             // Load existing settings from actionInfo
             const actionInfo = JSON.parse(inActionInfo);
             if (actionInfo && actionInfo.payload && actionInfo.payload.settings) {
